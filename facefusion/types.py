@@ -181,7 +181,7 @@ FaceSelectorMode = Literal['many', 'one', 'reference']
 FaceSelectorOrder = Literal['left-right', 'right-left', 'top-bottom', 'bottom-top', 'small-large', 'large-small', 'best-worst', 'worst-best']
 FaceOccluderModel = Literal['many', 'xseg_1', 'xseg_2', 'xseg_3']
 FaceParserModel = Literal['bisenet_resnet_18', 'bisenet_resnet_34']
-FaceMaskType = Literal['box', 'occlusion', 'area', 'region']
+FaceMaskType = Literal['box', 'occlusion', 'area', 'region', '3d']
 FaceMaskArea = Literal['upper-face', 'lower-face', 'mouth']
 FaceMaskRegion = Literal['skin', 'left-eyebrow', 'right-eyebrow', 'left-eye', 'right-eye', 'glasses', 'nose', 'mouth', 'upper-lip', 'lower-lip']
 FaceMaskRegionSet : TypeAlias = Dict[FaceMaskRegion, int]
@@ -379,6 +379,11 @@ StateKey = Literal\
 	'workflow_mode',
 	'workflow_strategy',
 	'processors',
+	'diffusion_swapper_model',
+	'diffusion_swapper_strength',
+	'diffusion_swapper_steps',
+	'diffusion_swapper_scale',
+	'diffusion_swapper_seed',
 	'open_browser',
 	'ui_layouts',
 	'ui_workflow',
@@ -452,6 +457,11 @@ State = TypedDict('State',
 	'workflow_mode' : WorkflowMode,
 	'workflow_strategy' : WorkflowStrategy,
 	'processors' : List[str],
+	'diffusion_swapper_model' : str,
+	'diffusion_swapper_strength' : float,
+	'diffusion_swapper_steps' : int,
+	'diffusion_swapper_scale' : float,
+	'diffusion_swapper_seed' : int,
 	'open_browser' : bool,
 	'ui_layouts' : List[str],
 	'ui_workflow' : UiWorkflow,

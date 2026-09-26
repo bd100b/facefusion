@@ -15,7 +15,7 @@ from facefusion.download import conditional_download_hashes, conditional_downloa
 from facefusion.execution import has_execution_provider
 from facefusion.face_creator import average_face_identity, get_one_face, get_static_faces, scale_face
 from facefusion.face_helper import paste_back, warp_face_by_face_landmark_5
-from facefusion.face_masker import create_area_mask, create_box_mask, create_occlusion_mask, create_region_mask
+from facefusion.face_masker import create_3d_mask, create_area_mask, create_box_mask, create_occlusion_mask, create_region_mask
 from facefusion.face_selector import select_faces, sort_faces_by_order
 from facefusion.filesystem import filter_image_paths, has_image, in_directory, is_image, is_video, resolve_relative_path, same_file_extension
 from facefusion.model_helper import get_static_model_initializer
@@ -634,6 +634,7 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 	pixel_boost_size = unpack_resolution(state_manager.get_item('face_swapper_pixel_boost'))
 	pixel_boost_total = pixel_boost_size[0] // model_size[0]
 	crop_vision_frame, affine_matrix = warp_face_by_face_landmark_5(temp_vision_frame, target_face.landmark_set.get('5/68'), model_template, pixel_boost_size)
+	face_landmark_5_crop = cv2.transform(target_face.landmark_set.get('5').reshape(1, -1, 2), affine_matrix).reshape(-1, 2)
 	temp_vision_frames = []
 	crop_masks = []
 
@@ -661,6 +662,10 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 	if 'region' in state_manager.get_item('face_mask_types'):
 		region_mask = create_region_mask(crop_vision_frame, state_manager.get_item('face_mask_regions'))
 		crop_masks.append(region_mask)
+
+	if '3d' in state_manager.get_item('face_mask_types'):
+		mask_3d = create_3d_mask(crop_vision_frame, face_landmark_5_crop, state_manager.get_item('face_mask_blur'), state_manager.get_item('face_mask_padding'))
+		crop_masks.append(mask_3d)
 
 	crop_mask = numpy.minimum.reduce(crop_masks).clip(0, 1)
 	paste_vision_frame = paste_back(temp_vision_frame, crop_vision_frame, crop_mask, affine_matrix)

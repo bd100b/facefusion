@@ -9,7 +9,7 @@ from facefusion import inference_manager, state_manager
 from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url
 from facefusion.filesystem import resolve_relative_path
 from facefusion.thread_helper import conditional_thread_semaphore
-from facefusion.types import DownloadScope, DownloadSet, FaceLandmark68, FaceMaskArea, FaceMaskRegion, InferencePool, Mask, ModelSet, Padding, VisionFrame
+from facefusion.types import DownloadScope, DownloadSet, FaceLandmark5, FaceLandmark68, FaceMaskArea, FaceMaskRegion, InferencePool, Mask, ModelSet, Padding, VisionFrame
 
 
 @lru_cache()
@@ -277,3 +277,82 @@ def forward_parse_face(prepare_vision_frame : VisionFrame) -> Mask:
 		})[0][0]
 
 	return region_mask
+
+
+HEAD_POSE_NOSE_DEPTH : float = 0.42
+HEAD_POSE_NOSE_HEIGHT : float = 0.57
+HEAD_POSE_MOUTH_HEIGHT : float = 1.15
+
+
+def estimate_head_pose(face_landmark_5 : FaceLandmark5) -> Tuple[float, float, float]:
+	"""Estimate coarse head yaw, pitch and roll in degrees from the five face landmarks.
+
+	Yaw is positive when the nose points to the right of the image, pitch is positive
+	when the face looks up and roll is the in plane tilt of the eye line. It is a closed
+	form fit of a generic 3d face model, intended for masking rather than metric pose.
+	"""
+	left_eye, right_eye, nose_tip, mouth_left, mouth_right = numpy.asarray(face_landmark_5, dtype = numpy.float64)
+	eye_distance = max(float(numpy.linalg.norm(right_eye - left_eye)), 1e-6)
+	eyes_mid = (left_eye + right_eye) * 0.5
+	mouth_mid = (mouth_left + mouth_right) * 0.5
+
+	roll = float(numpy.degrees(numpy.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0])))
+	roll = (roll + 90) % 180 - 90
+
+	cos_roll = numpy.cos(numpy.radians(roll))
+	sin_roll = numpy.sin(numpy.radians(roll))
+	derotation = numpy.array([ [ cos_roll, sin_roll ], [ -sin_roll, cos_roll ] ])
+	derotated = derotation.dot(numpy.column_stack([ nose_tip, mouth_mid ]) - eyes_mid.reshape(2, 1))
+	nose_offset, nose_drop = derotated[:, 0]
+	mouth_drop = derotated[1, 1]
+
+	if nose_drop < 0: # upside down face, flip to keep yaw and pitch well defined
+		nose_offset = -nose_offset
+		nose_drop = -nose_drop
+		mouth_drop = -mouth_drop
+
+	yaw = float(numpy.degrees(numpy.arctan2(nose_offset, HEAD_POSE_NOSE_DEPTH * eye_distance)))
+	yaw = max(min(yaw, 90.0), -90.0)
+
+	eye_to_nose = nose_drop / eye_distance
+	nose_to_mouth = (mouth_drop - nose_drop) / eye_distance
+	pose_model = numpy.array(
+	[
+		[ HEAD_POSE_NOSE_HEIGHT, -HEAD_POSE_NOSE_DEPTH ],
+		[ HEAD_POSE_MOUTH_HEIGHT - HEAD_POSE_NOSE_HEIGHT, HEAD_POSE_NOSE_DEPTH ]
+	])
+	cos_pitch, sin_pitch = numpy.linalg.solve(pose_model, numpy.array([ eye_to_nose, nose_to_mouth ]))
+	pitch = float(numpy.degrees(numpy.arctan2(sin_pitch, cos_pitch)))
+	pitch = max(min(pitch, 90.0), -90.0)
+
+	return yaw, pitch, roll
+
+
+def create_3d_mask(crop_vision_frame : VisionFrame, face_landmark_5 : FaceLandmark5, face_mask_blur : float, face_mask_padding : Padding) -> Mask:
+	"""Create a pose adaptive elliptical mask that follows the face when the head turns.
+
+	While the head yaws or pitches away from the front, the projected face shifts and
+	stretches inside the aligned crop, so the mask center follows the face and the
+	ellipse grows with the pose to keep the whole face covered.
+	"""
+	crop_height, crop_width = crop_vision_frame.shape[:2]
+	yaw, pitch, _ = estimate_head_pose(face_landmark_5)
+	yaw_factor = numpy.sin(numpy.radians(yaw))
+	pitch_factor = numpy.sin(numpy.radians(pitch))
+	padding_top, padding_right, padding_bottom, padding_left = face_mask_padding
+	x1 = crop_width * padding_left / 100
+	x2 = crop_width - crop_width * padding_right / 100
+	y1 = crop_height * padding_top / 100
+	y2 = crop_height - crop_height * padding_bottom / 100
+	center_x = (x1 + x2) * 0.5 + yaw_factor * (x2 - x1) * 0.12
+	center_y = (y1 + y2) * 0.5 - pitch_factor * (y2 - y1) * 0.10
+	axis_x = (x2 - x1) * 0.5 * (1 + 0.18 * abs(float(yaw_factor)))
+	axis_y = (y2 - y1) * 0.5 * (1 + 0.18 * abs(float(pitch_factor)))
+	mask_3d : Mask = numpy.zeros((crop_height, crop_width), dtype = numpy.float32)
+	cv2.ellipse(mask_3d, (int(round(center_x)), int(round(center_y))), (int(round(axis_x)), int(round(axis_y))), 0, 0, 360, 1.0, -1) #type:ignore[call-overload]
+
+	blur_amount = int(crop_width * 0.5 * face_mask_blur)
+
+	if blur_amount > 0:
+		mask_3d = cv2.GaussianBlur(mask_3d, (0, 0), blur_amount * 0.25)
+	return mask_3d

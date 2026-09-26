@@ -11,7 +11,7 @@ from facefusion import config, content_analyser, face_classifier, face_detector,
 from facefusion.common_helper import get_middle
 from facefusion.face_creator import scale_face
 from facefusion.face_helper import warp_face_by_face_landmark_5
-from facefusion.face_masker import create_area_mask, create_box_mask, create_occlusion_mask, create_region_mask
+from facefusion.face_masker import create_3d_mask, create_area_mask, create_box_mask, create_occlusion_mask, create_region_mask
 from facefusion.face_selector import select_faces
 from facefusion.filesystem import in_directory, is_image, is_video, same_file_extension
 from facefusion.processors.modules.face_debugger import choices as face_debugger_choices
@@ -128,6 +128,7 @@ def draw_face_mask(target_face : Face, temp_vision_frame : VisionFrame) -> Visio
 	face_landmark_68 = target_face.landmark_set.get('68')
 	face_landmark_5_68 = target_face.landmark_set.get('5/68')
 	crop_vision_frame, affine_matrix = warp_face_by_face_landmark_5(temp_vision_frame, face_landmark_5_68, 'arcface_128', (512, 512))
+	face_landmark_5_crop = cv2.transform(face_landmark_5.reshape(1, -1, 2), affine_matrix).reshape(-1, 2)
 	inverse_matrix = cv2.invertAffineTransform(affine_matrix)
 	temp_size = temp_vision_frame.shape[:2][::-1]
 	mask_scale = calculate_scale(temp_vision_frame)
@@ -155,6 +156,10 @@ def draw_face_mask(target_face : Face, temp_vision_frame : VisionFrame) -> Visio
 	if 'region' in state_manager.get_item('face_mask_types'):
 		region_mask = create_region_mask(crop_vision_frame, state_manager.get_item('face_mask_regions'))
 		crop_masks.append(region_mask)
+
+	if '3d' in state_manager.get_item('face_mask_types'):
+		mask_3d = create_3d_mask(crop_vision_frame, face_landmark_5_crop, 0, state_manager.get_item('face_mask_padding'))
+		crop_masks.append(mask_3d)
 
 	crop_mask = numpy.minimum.reduce(crop_masks).clip(0, 1)
 	crop_mask = (crop_mask * 255).astype(numpy.uint8)
