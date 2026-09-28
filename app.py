@@ -89,13 +89,23 @@ def run_swap(
     swap_mouth,
     face_mask_blur, face_mask_padding,
     proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
+    staged_source, staged_target,
 ):
     if source_file is None or target_file is None:
         yield "⚠️ Zəhmət olmasa həm mənbə (üz) həm də hədəf fayl yükləyin.", None, None, None
         return
 
-    source_path = _save_upload(source_file, "source")
-    target_path = _save_upload(target_file, "target")
+    try:
+        source_path = staged_source or _save_upload(source_file, "source")
+        target_path = staged_target or _save_upload(target_file, "target")
+    except OSError as exc:
+        yield (
+            "⚠️ Yüklənən fayl artıq mövcud deyil. Zəhmət olmasa faylı yenidən "
+            f"seçin və bir daha 'Başlat' edin. ({exc})",
+            None, None, None,
+        )
+        return
+
     output_path = _output_path_for(target_path)
     is_video = _is_video(target_path)
 
@@ -231,6 +241,35 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
             target_input = gr.File(
                 label="2️⃣ Hədəf (Şəkil və ya Video)",
                 file_types=["image", "video"], type="filepath",
+            )
+
+            # Gradio-nun /tmp/gradio temp fayllari eventler arasinda siline
+            # bilir (HF Space) -> fayli yukleme ANINDA oz qovlugumuza
+            # kopyalayiriq ve klik handler-e gr.State ile otururuk.
+            source_staged = gr.State(None)
+            target_staged = gr.State(None)
+
+            def _stage_source(upload_path):
+                if upload_path is None:
+                    return None
+                try:
+                    return _save_upload(upload_path, "source")
+                except OSError:
+                    return None
+
+            def _stage_target(upload_path):
+                if upload_path is None:
+                    return None
+                try:
+                    return _save_upload(upload_path, "target")
+                except OSError:
+                    return None
+
+            source_input.upload(
+                fn=_stage_source, inputs=[source_input], outputs=[source_staged],
+            )
+            target_input.upload(
+                fn=_stage_target, inputs=[target_input], outputs=[target_staged],
             )
 
             with gr.Tabs():
@@ -389,6 +428,7 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
             swap_mouth,
             face_mask_blur, face_mask_padding,
             proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
+            source_staged, target_staged,
         ],
         outputs=[log_box, result_file, preview_image, preview_video],
     )
