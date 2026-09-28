@@ -121,12 +121,14 @@ def run_swap(
                 pass
 
     processors = ["face_swapper"]
+    # Zencir sirasi onemlidir: swap -> diffusion (realliq berpasi)
+    # -> enhancer (son deqiqllesme). Diffusion enhancer-den ONCE gelmelidir.
+    if proc_diffusion:
+        processors.append("diffusion_swapper")
     if proc_face_enhancer:
         processors.append("face_enhancer")
     if proc_expression_restorer and is_video:
         processors.append("expression_restorer")
-    if proc_diffusion:
-        processors.append("diffusion_swapper")
 
     face_mask_types = ["box", "occlusion", "region"]
     if proc_diffusion:
