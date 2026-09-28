@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -158,17 +159,30 @@ class FaceFusionSwapper:
         reader_thread.start()
 
         logs: list[str] = []
+        last_yield_time = time.time()
+        start_hint = "⏳ FaceFusion başlayır (modellər hazırlanır) — ilk saniyələr sakitdir..."
         while True:
             try:
-                line = line_queue.get(timeout=0.5)
+                line = line_queue.get(timeout=0.3)
             except queue.Empty:
-                if logs:
-                    yield "\n".join(logs[-120:]), False, None
+                # Heartbeat: baglanti kesilmasin deye 2 san barda magiza
+                # yeni mesaj gondərir (HF proxy boş stream-ləri kəsir).
+                if time.time() - last_yield_time >= 2.0:
+                    if logs:
+                        yield "\n".join(logs[-120:]), False, None
+                    else:
+                        yield start_hint, False, None
+                    last_yield_time = time.time()
                 continue
             if line is None:
                 break
             logs.append(line)
-            yield "\n".join(logs[-120:]), False, None
+            if len(logs) > 500:
+                logs = logs[-500:]
+            now = time.time()
+            if now - last_yield_time >= 0.3:
+                yield "\n".join(logs[-120:]), False, None
+                last_yield_time = now
 
         reader_thread.join()
         process.wait()

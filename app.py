@@ -36,6 +36,10 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 TMP_DIR = Path("/app/facefusion_tmp")
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 
+# Eyni anda yalnız bir swap prosesi: ikinci klik queue-da gözləyib
+# spinner göstərməsin, əvəzində dərhal xəbərdarlıq verək.
+BUSY = {"active": False, "message": ""}
+
 BASE_MASK_REGIONS = [
     "skin", "left-eyebrow", "right-eyebrow", "left-eye", "right-eye",
     "glasses", "nose",
@@ -94,6 +98,43 @@ def run_swap(
     if source_file is None or target_file is None:
         yield "⚠️ Zəhmət olmasa həm mənbə (üz) həm də hədəf fayl yükləyin.", None, None, None
         return
+    if BUSY["active"]:
+        yield (
+            "⏳ Bir proses artıq işləyir: " + BUSY["message"] + "\n"
+            "Zəhmət olmasa bitənə qədər gözləyin (Log qutusu canlı yenilənir).",
+            None, None, None,
+        )
+        return
+    BUSY["active"] = True
+    BUSY["message"] = "başladıldı..."
+
+    try:
+        yield from _run_swap_impl(
+            source_file, target_file, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
+            landmarker, face_detector_model, face_detector_score, face_landmarker_score,
+            face_tracker_score, reference_face_distance, detector_angles,
+            proc_face_enhancer, enhancer_model, enhancer_blend,
+            proc_expression_restorer, expression_restorer_model, video_preset,
+            swap_mouth,
+            face_mask_blur, face_mask_padding,
+            proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
+            staged_source, staged_target,
+        )
+    finally:
+        BUSY["active"] = False
+
+
+def _run_swap_impl(
+    source_file, target_file, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
+    landmarker, face_detector_model, face_detector_score, face_landmarker_score,
+    face_tracker_score, reference_face_distance, detector_angles,
+    proc_face_enhancer, enhancer_model, enhancer_blend,
+    proc_expression_restorer, expression_restorer_model, video_preset,
+    swap_mouth,
+    face_mask_blur, face_mask_padding,
+    proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
+    staged_source, staged_target,
+):
 
     try:
         source_path = staged_source or _save_upload(source_file, "source")
@@ -203,6 +244,9 @@ def run_swap(
             execution_thread_count=2,
             options=options,
         ):
+            if not done:
+                first_line = log.splitlines()[-1] if log else ""
+                BUSY["message"] = first_line[:80]
             if done:
                 if not Path(result).exists() or Path(result).stat().st_size < 10000:
                     yield log + "\n❌ Xəta: Output fayl boşdur.", None, None, None
