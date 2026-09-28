@@ -572,6 +572,10 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
             preview_image = gr.Image(label="Şəkil nəticəsi", visible=False)
             preview_video = gr.Video(label="Video nəticəsi", visible=False)
             result_file = gr.File(label="Faylı Yüklə", interactive=False)
+            restore_btn = gr.Button(
+                "🔄 Logları və nəticəni geri gətir (əlaqə kəsilsə)",
+                variant="secondary", size="sm",
+            )
 
     # 🧠 DİNAMİK MƏNTİQ: Model dəyişəndə avtomatik tənzimləmə
     def on_model_change(selected_model):
@@ -612,9 +616,18 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
         show_progress="hidden",
     )
 
-    # "Broken connect" fallback: SSE kəsilib nəticə çatmadıqda output
-    # komponentinə klikləmək hər şeyi bir istəklə geri qaytarır.
-    result_file.click(
+    # "Broken connect" fallback 1: düyməyə klikləmək hər şeyi bir istəklə
+    # geri qaytarır (gr.File-da click eventi yoxdur, ona görə ayrıca Button).
+    restore_btn.click(
+        fn=deliver_result,
+        inputs=None,
+        outputs=[log_box, result_file, preview_image, preview_video],
+        show_progress="hidden",
+    )
+
+    # "Broken connect" fallback 2: istifadəçi səhifəni yeniləsə belə,
+    # bitmiş işin logu və nəticəsi avtomatik geri yüklənir.
+    demo.load(
         fn=deliver_result,
         inputs=None,
         outputs=[log_box, result_file, preview_image, preview_video],
