@@ -8,8 +8,11 @@ GPU (CUDA) dəstəyi və sabit video izləmə (tracking) ilə.
 from __future__ import annotations
 
 import os
+import queue
+import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -124,16 +127,50 @@ class FaceFusionSwapper:
             cwd=str(self.facefusion_dir),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            bufsize=0,
             env=self._base_env(),
         )
+
+        # FaceFusion irəliləyişi tqdm ilə \r ilə yeniləyir; yalnız \n oxusan
+        # yükləmə/proses boyu heç nə görmürsən. Həm \r həm \n üzrə bölürük.
+        line_queue: "queue.Queue[Optional[str]]" = queue.Queue()
+
+        def _reader() -> None:
+            buffer = b""
+            stream = process.stdout
+            while True:
+                chunk = stream.read(4096)  # type: ignore[union-attr]
+                if not chunk:
+                    break
+                buffer += chunk
+                parts = re.split(b"[\r\n]", buffer)
+                buffer = parts[-1]
+                for part in parts[:-1]:
+                    text = part.decode("utf-8", errors="replace").strip()
+                    if text:
+                        line_queue.put(text)
+            tail = buffer.decode("utf-8", errors="replace").strip()
+            if tail:
+                line_queue.put(tail)
+            line_queue.put(None)
+
+        reader_thread = threading.Thread(target=_reader, daemon=True)
+        reader_thread.start()
+
         logs: list[str] = []
-        for line in process.stdout:  # type: ignore[union-attr]
-            line = line.rstrip()
-            if line:
-                logs.append(line)
-                yield "\n".join(logs[-120:]), False, None
+        while True:
+            try:
+                line = line_queue.get(timeout=0.5)
+            except queue.Empty:
+                if logs:
+                    yield "\n".join(logs[-120:]), False, None
+                continue
+            if line is None:
+                break
+            logs.append(line)
+            yield "\n".join(logs[-120:]), False, None
+
+        reader_thread.join()
         process.wait()
 
         full_log = "\n".join(logs[-120:])
