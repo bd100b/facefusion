@@ -2,6 +2,14 @@
 app.py
 ======
 Hugging Face Space üçün FaceFusion 3.9.0 — Dinamik model optimizasiyası ilə.
+
+Streaming arxitekturası (HF proxy "Broken connect" düzəlişi):
+- Uzunmüddətli SSE stream YOXDUR. "Başlat" klikı prosesi arxa planda
+  thread-də başladır və dərhal qısa cavab qaytarır.
+- gr.Timer hər 2 saniyədə logları/nəticəni poll edir — hər tick ayrı,
+  qısa HTTP isteği olduğu üçün proxy tərəfindən kəsilmir.
+- Buna baxmayaraq əlaqə kəsilsə, "Faylı Yüklə" komponentinə klikləmək
+  bütün logları + nəticəni bir istəklə geri qaytarır.
 """
 
 from __future__ import annotations
@@ -9,6 +17,9 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
+import time
+import uuid
 from pathlib import Path
 
 import gradio as gr
@@ -40,12 +51,24 @@ TMP_DIR.mkdir(parents=True, exist_ok=True)
 # spinner göstərməsin, əvəzində dərhal xəbərdarlıq verək.
 BUSY = {"active": False, "message": ""}
 
+# Aktual işin vəziyyəti modul səviyyəsində saxlanılır: SSE əlaqəsi kəsilsə
+# belə (HF proxy "Broken connect"), polling və fallback klik işi geri
+# sinxronlaşdıra bilir. Thread-lər arası sadə dict — GIL altında təhlükəsizdir.
+JOB: dict = {
+    "id": None,
+    "log": "",
+    "running": False,
+    "done": False,
+    "delivered": False,
+    "result": None,
+    "video": False,
+}
+
 BASE_MASK_REGIONS = [
     "skin", "left-eyebrow", "right-eyebrow", "left-eye", "right-eye",
     "glasses", "nose",
 ]
 MOUTH_REGIONS = ["mouth", "upper-lip", "lower-lip"]
-
 
 
 def _probe_fps(path: str):
@@ -84,7 +107,7 @@ def _is_video(path: str) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
 
-def run_swap(
+def start_swap(
     source_file, target_file, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
     landmarker, face_detector_model, face_detector_score, face_landmarker_score,
     face_tracker_score, reference_face_distance, detector_angles,
@@ -93,57 +116,126 @@ def run_swap(
     swap_mouth,
     face_mask_blur, face_mask_padding,
     proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
-    staged_source, staged_target,
+    source_staged, target_staged,
 ):
+    """Qısa, stream-olmayan handler: prosesi thread-də başladır, dərhal qayıdır."""
     if source_file is None or target_file is None:
-        yield "⚠️ Zəhmət olmasa həm mənbə (üz) həm də hədəf fayl yükləyin.", None, None, None
-        return
-    if BUSY["active"]:
-        yield (
-            "⏳ Bir proses artıq işləyir: " + BUSY["message"] + "\n"
-            "Zəhmət olmasa bitənə qədər gözləyin (Log qutusu canlı yenilənir).",
-            None, None, None,
+        return (
+            "⚠️ Zəhmət olmasa həm mənbə (üz) həm də hədəf fayl yükləyin.",
+            None, gr.update(visible=False), gr.update(visible=False),
         )
-        return
+    if BUSY["active"]:
+        return (
+            f"⏳ Bir proses artıq işləyir: {BUSY['message']}\n"
+            "Bitəndə nəticə avtomatik görünəcək.",
+            None, gr.update(visible=False), gr.update(visible=False),
+        )
     BUSY["active"] = True
     BUSY["message"] = "başladıldı..."
 
+    job_id = f"job-{time.strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    JOB.update({
+        "id": job_id,
+        "log": "🚀 Növbəyə alındı, arxa planda başladılır...",
+        "running": True,
+        "done": False,
+        "delivered": False,
+        "result": None,
+        "video": False,
+    })
+
+    params = {
+        "source_file": source_file,
+        "target_file": target_file,
+        "model": model,
+        "pixel_boost": pixel_boost,
+        "face_swapper_weight": face_swapper_weight,
+        "selector_mode": selector_mode,
+        "selector_order": selector_order,
+        "landmarker": landmarker,
+        "face_detector_model": face_detector_model,
+        "face_detector_score": face_detector_score,
+        "face_landmarker_score": face_landmarker_score,
+        "face_tracker_score": face_tracker_score,
+        "reference_face_distance": reference_face_distance,
+        "detector_angles": detector_angles,
+        "proc_face_enhancer": proc_face_enhancer,
+        "enhancer_model": enhancer_model,
+        "enhancer_blend": enhancer_blend,
+        "proc_expression_restorer": proc_expression_restorer,
+        "expression_restorer_model": expression_restorer_model,
+        "video_preset": video_preset,
+        "swap_mouth": swap_mouth,
+        "face_mask_blur": face_mask_blur,
+        "face_mask_padding": face_mask_padding,
+        "proc_diffusion": proc_diffusion,
+        "diffusion_strength": diffusion_strength,
+        "diffusion_steps": diffusion_steps,
+        "diffusion_scale": diffusion_scale,
+        "staged_source": source_staged,
+        "staged_target": target_staged,
+    }
+    threading.Thread(target=_swap_worker, args=(job_id, params), daemon=True).start()
+
+    return (
+        "🚀 Proses arxa planda başladıldı.\n"
+        "⏳ Loglar hər 2 saniyədə avtomatik yenilənir; nəticə bitəndə öz-özünə görünəcək.\n"
+        "(Əgər brauzerdə 'Broken connect' görsəniz, səhifəni yeniləməyə ehtiyac yoxdur —\n"
+        "'Faylı Yüklə' qutusuna klikləyib logları və nəticəni geri gətirə bilərsiniz.)",
+        None, gr.update(visible=False), gr.update(visible=False),
+    )
+
+
+def _swap_worker(job_id: str, params: dict) -> None:
     try:
-        yield from _run_swap_impl(
-            source_file, target_file, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
-            landmarker, face_detector_model, face_detector_score, face_landmarker_score,
-            face_tracker_score, reference_face_distance, detector_angles,
-            proc_face_enhancer, enhancer_model, enhancer_blend,
-            proc_expression_restorer, expression_restorer_model, video_preset,
-            swap_mouth,
-            face_mask_blur, face_mask_padding,
-            proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
-            staged_source, staged_target,
-        )
+        _execute_swap(params)
+    except Exception as exc:  # noqa: BLE001
+        JOB["log"] = (JOB["log"] + f"\n❌ Gözlənilməz xəta: {exc}").strip()
     finally:
+        JOB["running"] = False
+        JOB["done"] = True
         BUSY["active"] = False
+        BUSY["message"] = ""
 
 
-def _run_swap_impl(
-    source_file, target_file, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
-    landmarker, face_detector_model, face_detector_score, face_landmarker_score,
-    face_tracker_score, reference_face_distance, detector_angles,
-    proc_face_enhancer, enhancer_model, enhancer_blend,
-    proc_expression_restorer, expression_restorer_model, video_preset,
-    swap_mouth,
-    face_mask_blur, face_mask_padding,
-    proc_diffusion, diffusion_strength, diffusion_steps, diffusion_scale,
-    staged_source, staged_target,
-):
+def _execute_swap(params: dict) -> None:
+    source_file = params["source_file"]
+    target_file = params["target_file"]
+    staged_source = params["staged_source"]
+    staged_target = params["staged_target"]
+    model = params["model"]
+    pixel_boost = params["pixel_boost"]
+    face_swapper_weight = params["face_swapper_weight"]
+    selector_mode = params["selector_mode"]
+    selector_order = params["selector_order"]
+    landmarker = params["landmarker"]
+    face_detector_model = params["face_detector_model"]
+    face_detector_score = params["face_detector_score"]
+    face_landmarker_score = params["face_landmarker_score"]
+    face_tracker_score = params["face_tracker_score"]
+    reference_face_distance = params["reference_face_distance"]
+    detector_angles = params["detector_angles"]
+    proc_face_enhancer = params["proc_face_enhancer"]
+    enhancer_model = params["enhancer_model"]
+    enhancer_blend = params["enhancer_blend"]
+    proc_expression_restorer = params["proc_expression_restorer"]
+    expression_restorer_model = params["expression_restorer_model"]
+    video_preset = params["video_preset"]
+    swap_mouth = params["swap_mouth"]
+    face_mask_blur = params["face_mask_blur"]
+    face_mask_padding = params["face_mask_padding"]
+    proc_diffusion = params["proc_diffusion"]
+    diffusion_strength = params["diffusion_strength"]
+    diffusion_steps = params["diffusion_steps"]
+    diffusion_scale = params["diffusion_scale"]
 
     try:
         source_path = staged_source or _save_upload(source_file, "source")
         target_path = staged_target or _save_upload(target_file, "target")
     except OSError as exc:
-        yield (
+        JOB["log"] = (
             "⚠️ Yüklənən fayl artıq mövcud deyil. Zəhmət olmasa faylı yenidən "
-            f"seçin və bir daha 'Başlat' edin. ({exc})",
-            None, None, None,
+            f"seçin və bir daha 'Başlat' edin. ({exc})"
         )
         return
 
@@ -229,10 +321,9 @@ def _run_swap_impl(
         f" | Diffusion: {diffusion_strength} qüvvə, {diffusion_steps} addım"
         if proc_diffusion else ""
     )
-    yield (
+    JOB["log"] = (
         "🚀 FaceFusion prosesi başladılır (Thread: 2, memory: strict)...\n"
-        f"Detector: {face_detector_model} | Model: {model} | Pixel Boost: {pixel_boost}{diffusion_note}\n",
-        None, None, None,
+        f"Detector: {face_detector_model} | Model: {model} | Pixel Boost: {pixel_boost}{diffusion_note}\n"
     )
 
     try:
@@ -244,33 +335,64 @@ def _run_swap_impl(
             execution_thread_count=2,
             options=options,
         ):
+            JOB["log"] = log
             if not done:
                 first_line = log.splitlines()[-1] if log else ""
                 BUSY["message"] = first_line[:80]
-            if done:
-                if not Path(result).exists() or Path(result).stat().st_size < 10000:
-                    yield log + "\n❌ Xəta: Output fayl boşdur.", None, None, None
-                    return
-                if _is_video(result):
-                    yield (
-                        log + "\n✅ Hazırdır!",
-                        result,
-                        gr.update(value=None, visible=False),
-                        gr.update(value=result, visible=True),
-                    )
-                else:
-                    yield (
-                        log + "\n✅ Hazırdır!",
-                        result,
-                        gr.update(value=result, visible=True),
-                        gr.update(value=None, visible=False),
-                    )
+                continue
+            if not Path(result).exists() or Path(result).stat().st_size < 10000:
+                JOB["log"] = log + "\n❌ Xəta: Output fayl boşdur."
                 return
-            yield log, None, None, None
+            JOB["result"] = result
+            JOB["video"] = _is_video(result)
+            return
+        # Generatorda done=False ilə bitdisə, JOB["log"]-da [ERROR] sətri var.
     except FaceFusionError as exc:
-        yield f"❌ Xəta baş verdi:\n{exc}", None, None, None
-    except Exception as exc:
-        yield f"❌ Gözlənilməz xəta: {exc}", None, None, None
+        JOB["log"] = f"❌ Xəta baş verdi:\n{exc}"
+    except Exception as exc:  # noqa: BLE001
+        JOB["log"] = f"❌ Gözlənilməz xəta: {exc}"
+
+
+def _delivery_update(job: dict):
+    """Bitmiş işin çıxışlarını [log_box, result_file, preview_image, preview_video] sırası ilə qaytarır."""
+    result = job.get("result")
+    if not result or not Path(result).exists():
+        return (
+            job.get("log", "") + "\n❌ Nəticə istehsal olunmadı (loglara baxın).",
+            None, gr.update(visible=False), gr.update(visible=False),
+        )
+    if job.get("video"):
+        return (
+            job.get("log", "") + "\n✅ Hazırdır!",
+            gr.update(value=result),
+            gr.update(value=None, visible=False),
+            gr.update(value=result, visible=True),
+        )
+    return (
+        job.get("log", "") + "\n✅ Hazırdır!",
+        gr.update(value=result),
+        gr.update(value=result, visible=True),
+        gr.update(value=None, visible=False),
+    )
+
+
+def poll_job():
+    """gr.Timer tick-i: işin cari vəziyyətini UI-yə yazır (qısa istekdir, kəsilmir)."""
+    if JOB["delivered"] or (not JOB["running"] and not JOB["done"]):
+        return gr.update(), gr.update(), gr.update(), gr.update()
+    if JOB["done"]:
+        JOB["delivered"] = True
+        return _delivery_update(JOB)
+    log = JOB["log"] or "⏳ İlk saniyələr sakitdir (modellər yüklənir)..."
+    return log, gr.update(), gr.update(), gr.update()
+
+
+def deliver_result():
+    """Fallback: SSE kəsilib nəticə client-ə çatmadıqda, output komponentinə
+    klikləməklə hər şeyi bir istəklə geri qaytarır."""
+    if not JOB["done"]:
+        return gr.update(), gr.update(), gr.update(), gr.update()
+    return _delivery_update(JOB)
 
 
 with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
@@ -331,7 +453,7 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
                         choices=["512x512", "256x256", "None"],
                         value="512x512",
                     )
-                    
+
                     # 👈 AlphaFace üçün xüsusi çəki slider-i (başlanğıcda gizli)
                     face_swapper_weight = gr.Slider(
                         label="AlphaFace Weight (Uyğunlaşma çəkisi: 0.85 - 0.90 ideal)",
@@ -464,8 +586,9 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
         outputs=[pixel_boost, face_swapper_weight],
     )
 
+    # Qısa, stream-olmayan klik: prosesi thread-də başladır, dərhal cavab verir.
     run_btn.click(
-        fn=run_swap,
+        fn=start_swap,
         inputs=[
             source_input, target_input, model, pixel_boost, face_swapper_weight, selector_mode, selector_order,
             landmarker, face_detector_model, face_detector_score, face_landmarker_score,
@@ -479,6 +602,27 @@ with gr.Blocks(title="FaceFusion Pro — Face Swap") as demo:
         ],
         outputs=[log_box, result_file, preview_image, preview_video],
     )
+
+    # Polling: hər 2 saniyədə ayrı-qısa istək — SSE stream yoxdur, kəsilmir.
+    tick_timer = gr.Timer(2.0)
+    tick_timer.tick(
+        fn=poll_job,
+        inputs=None,
+        outputs=[log_box, result_file, preview_image, preview_video],
+        show_progress="hidden",
+    )
+
+    # "Broken connect" fallback: SSE kəsilib nəticə çatmadıqda output
+    # komponentinə klikləmək hər şeyi bir istəklə geri qaytarır.
+    result_file.click(
+        fn=deliver_result,
+        inputs=None,
+        outputs=[log_box, result_file, preview_image, preview_video],
+        show_progress="hidden",
+    )
+
+
+demo.queue(max_size=16)
 
 if __name__ == "__main__":
     demo.launch(
