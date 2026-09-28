@@ -175,6 +175,7 @@ def run_swap(
         "output_video_preset": video_preset,
         "output_video_quality": 95,
         "workflow_strategy": "disk",
+        "video_memory_strategy": "strict",
         "diffusion_swapper_model": "sd_1_5_inpainting",
         "diffusion_swapper_strength": float(diffusion_strength),
         "diffusion_swapper_steps": int(diffusion_steps),
@@ -186,7 +187,7 @@ def run_swap(
         if proc_diffusion else ""
     )
     yield (
-        "🚀 FaceFusion prosesi başladılır (Thread: 8)...\n"
+        "🚀 FaceFusion prosesi başladılır (Thread: 2, memory: strict)...\n"
         f"Detector: {face_detector_model} | Model: {model} | Pixel Boost: {pixel_boost}{diffusion_note}\n",
         None, None, None,
     )
@@ -197,7 +198,7 @@ def run_swap(
             target_path=target_path,
             output_path=output_path,
             face_selector_mode=selector_mode,
-            execution_thread_count=8,
+            execution_thread_count=2,
             options=options,
         ):
             if done:
