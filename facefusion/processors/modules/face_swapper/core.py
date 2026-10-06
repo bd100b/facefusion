@@ -9,7 +9,7 @@ import numpy
 import facefusion.choices
 import facefusion.jobs.job_manager
 import facefusion.jobs.job_store
-from facefusion import config, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, inference_manager, logger, state_manager, translator, video_manager, voice_extractor
+from facefusion import adaptive_masker, config, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, inference_manager, logger, state_manager, target_tracker, translator, video_manager, voice_extractor
 from facefusion.common_helper import get_first, get_middle, is_macos
 from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url
 from facefusion.execution import has_execution_provider
@@ -627,6 +627,9 @@ def post_process() -> None:
 		for common_module in get_common_modules():
 			common_module.clear_inference_pool()
 
+	target_tracker.clear_target_tracks()
+	adaptive_masker.clear_adaptive_masks()
+
 
 def swap_face(source_face : Face, target_face : Face, source_vision_frame : VisionFrame, temp_vision_frame : VisionFrame) -> VisionFrame:
 	model_template = get_model_options().get('template')
@@ -668,6 +671,10 @@ def swap_face(source_face : Face, target_face : Face, source_vision_frame : Visi
 		crop_masks.append(mask_3d)
 
 	crop_mask = numpy.minimum.reduce(crop_masks).clip(0, 1)
+
+	if state_manager.get_item('adaptive_mask') or state_manager.get_item('temporal_mask'):
+		crop_mask = adaptive_masker.create_adaptive_crop_mask(crop_vision_frame, crop_mask, face_landmark_5_crop, target_tracker.get_tracking_status())
+
 	paste_vision_frame = paste_back(temp_vision_frame, crop_vision_frame, crop_mask, affine_matrix)
 	return paste_vision_frame
 
@@ -821,13 +828,22 @@ def process_frame(inputs : FaceSwapperInputs) -> ProcessorOutputs:
 
 	target_vision_frame = get_middle(target_vision_frames)
 	source_face = extract_source_face(source_vision_frames)
-	target_faces = select_faces(reference_vision_frame, source_vision_frames, target_vision_frames)
+
+	if state_manager.get_item('target_track'):
+		target_faces = target_tracker.select_target_face(reference_vision_frame, source_vision_frames, target_vision_frames)
+	else:
+		target_faces = select_faces(reference_vision_frame, source_vision_frames, target_vision_frames)
 
 	if source_face and target_faces:
 		source_vision_frame = get_first(source_vision_frames)
+		debug_face : Optional[Face] = None
 
 		for target_face in target_faces:
 			target_face = scale_face(target_face, target_vision_frame, temp_vision_frame)
+			debug_face = target_face
 			temp_vision_frame = swap_face(source_face, target_face, source_vision_frame, temp_vision_frame)
+
+		if state_manager.get_item('target_track_debug'):
+			temp_vision_frame = target_tracker.draw_track_debug(temp_vision_frame, debug_face)
 
 	return temp_vision_frame, temp_vision_mask

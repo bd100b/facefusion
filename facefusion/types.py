@@ -84,6 +84,47 @@ Matrix : TypeAlias = NDArray[Any]
 Anchors : TypeAlias = NDArray[Any]
 Translation : TypeAlias = NDArray[Any]
 
+TrackingStatus = Literal['tracked', 'predicted', 'reacquiring', 'lost']
+PoseBucket = Literal['front', 'left', 'right', 'up', 'down']
+TargetTrackReference = TypedDict('TargetTrackReference',
+{
+	'pose': PoseBucket,
+	'embedding': Embedding #type:ignore[valid-type]
+})
+TargetTrackObservation = TypedDict('TargetTrackObservation',
+{
+	'frame_number': int,
+	'bounding_box': BoundingBox, #type:ignore[valid-type]
+	'landmark_set': FaceLandmarkSet,
+	'embedding': Embedding, #type:ignore[valid-type]
+	'detector_score': Score,
+	'identity_score': Score,
+	'visibility': float
+})
+TargetTrackState = TypedDict('TargetTrackState',
+{
+	'target_identity': Embedding, #type:ignore[valid-type]
+	'references': List[TargetTrackReference], #type:ignore[valid-type]
+	'observations': List[TargetTrackObservation], #type:ignore[valid-type]
+	'last_bounding_box': Optional[BoundingBox], #type:ignore[valid-type]
+	'last_landmark_set': Optional[FaceLandmarkSet], #type:ignore[valid-type]
+	'last_embedding': Optional[Embedding], #type:ignore[valid-type]
+	'last_affine_matrix': Optional[Matrix], #type:ignore[valid-type]
+	'last_mask': Optional[Mask], #type:ignore[valid-type]
+	'face_confidence': Score,
+	'frame_index': int,
+	'tracking_confidence': Score,
+	'predicted_bounding_box': Optional[BoundingBox], #type:ignore[valid-type]
+	'estimated_scale': Scale,
+	'estimated_rotation': float,
+	'estimated_yaw': float,
+	'estimated_pitch': float,
+	'visibility': float,
+	'status': TrackingStatus,
+	'lost_frame_count': int
+})
+TargetTrackStateSet : TypeAlias = Dict[str, TargetTrackState]
+
 AudioBuffer : TypeAlias = bytes
 Audio : TypeAlias = NDArray[Any]
 AudioChunk : TypeAlias = NDArray[Any]
@@ -353,6 +394,18 @@ StateKey = Literal\
 	'reference_face_distance',
 	'reference_frame_number',
 	'face_tracker_score',
+	'target_track',
+	'target_track_max_lost_frames',
+	'target_track_smoothing',
+	'target_track_iou_threshold',
+	'target_track_embedding_threshold',
+	'target_track_motion_weight',
+	'target_track_identity_weight',
+	'target_track_debug',
+	'adaptive_mask',
+	'adaptive_mask_feather',
+	'temporal_mask',
+	'partial_face_mode',
 	'face_occluder_model',
 	'face_parser_model',
 	'face_mask_types',
@@ -431,6 +484,18 @@ State = TypedDict('State',
 	'reference_face_distance' : float,
 	'reference_frame_number' : int,
 	'face_tracker_score' : Score,
+	'target_track' : bool,
+	'target_track_max_lost_frames' : int,
+	'target_track_smoothing' : float,
+	'target_track_iou_threshold' : float,
+	'target_track_embedding_threshold' : float,
+	'target_track_motion_weight' : float,
+	'target_track_identity_weight' : float,
+	'target_track_debug' : bool,
+	'adaptive_mask' : bool,
+	'adaptive_mask_feather' : float,
+	'temporal_mask' : bool,
+	'partial_face_mode' : bool,
 	'face_occluder_model' : FaceOccluderModel,
 	'face_parser_model' : FaceParserModel,
 	'face_mask_types' : List[FaceMaskType],

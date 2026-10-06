@@ -1,5 +1,5 @@
 import tempfile
-from argparse import ArgumentParser, HelpFormatter
+from argparse import ArgumentParser, BooleanOptionalAction, HelpFormatter
 from functools import partial
 
 import facefusion.choices
@@ -138,6 +138,25 @@ def create_face_tracker_program() -> ArgumentParser:
 	group_face_tracker = program.add_argument_group('face tracker')
 	group_face_tracker.add_argument('--face-tracker-score', help = translator.get('help.face_tracker_score'), type = float, default = config.get_float_value('face_tracker', 'face_tracker_score', '0.0'), choices = facefusion.choices.face_tracker_score_range, metavar = create_float_metavar(facefusion.choices.face_tracker_score_range))
 	job_store.register_step_keys([ 'face_tracker_score' ])
+	return program
+
+
+def create_target_tracker_program() -> ArgumentParser:
+	program = ArgumentParser(add_help = False)
+	group_target_tracker = program.add_argument_group('target tracker')
+	group_target_tracker.add_argument('--target-track', help = translator.get('help.target_track'), action = BooleanOptionalAction, default = config.get_bool_value('target_tracker', 'target_track', 'True'))
+	group_target_tracker.add_argument('--target-track-max-lost-frames', help = translator.get('help.target_track_max_lost_frames'), type = int, default = config.get_int_value('target_tracker', 'target_track_max_lost_frames', '15'), choices = facefusion.choices.target_track_max_lost_frames_range, metavar = create_int_metavar(facefusion.choices.target_track_max_lost_frames_range))
+	group_target_tracker.add_argument('--target-track-smoothing', help = translator.get('help.target_track_smoothing'), type = float, default = config.get_float_value('target_tracker', 'target_track_smoothing', '0.5'), choices = facefusion.choices.target_track_smoothing_range, metavar = create_float_metavar(facefusion.choices.target_track_smoothing_range))
+	group_target_tracker.add_argument('--target-track-iou-threshold', help = translator.get('help.target_track_iou_threshold'), type = float, default = config.get_float_value('target_tracker', 'target_track_iou_threshold', '0.3'), choices = facefusion.choices.target_track_iou_threshold_range, metavar = create_float_metavar(facefusion.choices.target_track_iou_threshold_range))
+	group_target_tracker.add_argument('--target-track-embedding-threshold', help = translator.get('help.target_track_embedding_threshold'), type = float, default = config.get_float_value('target_tracker', 'target_track_embedding_threshold', '0.3'), choices = facefusion.choices.target_track_embedding_threshold_range, metavar = create_float_metavar(facefusion.choices.target_track_embedding_threshold_range))
+	group_target_tracker.add_argument('--target-track-motion-weight', help = translator.get('help.target_track_motion_weight'), type = float, default = config.get_float_value('target_tracker', 'target_track_motion_weight', '0.5'), choices = facefusion.choices.target_track_motion_weight_range, metavar = create_float_metavar(facefusion.choices.target_track_motion_weight_range))
+	group_target_tracker.add_argument('--target-track-identity-weight', help = translator.get('help.target_track_identity_weight'), type = float, default = config.get_float_value('target_tracker', 'target_track_identity_weight', '0.5'), choices = facefusion.choices.target_track_identity_weight_range, metavar = create_float_metavar(facefusion.choices.target_track_identity_weight_range))
+	group_target_tracker.add_argument('--target-track-debug', help = translator.get('help.target_track_debug'), action = BooleanOptionalAction, default = config.get_bool_value('target_tracker', 'target_track_debug', 'False'))
+	group_target_tracker.add_argument('--adaptive-mask', help = translator.get('help.adaptive_mask'), action = BooleanOptionalAction, default = config.get_bool_value('target_tracker', 'adaptive_mask', 'True'))
+	group_target_tracker.add_argument('--adaptive-mask-feather', help = translator.get('help.adaptive_mask_feather'), type = float, default = config.get_float_value('target_tracker', 'adaptive_mask_feather', '0.2'), choices = facefusion.choices.adaptive_mask_feather_range, metavar = create_float_metavar(facefusion.choices.adaptive_mask_feather_range))
+	group_target_tracker.add_argument('--temporal-mask', help = translator.get('help.temporal_mask'), action = BooleanOptionalAction, default = config.get_bool_value('target_tracker', 'temporal_mask', 'True'))
+	group_target_tracker.add_argument('--partial-face-mode', help = translator.get('help.partial_face_mode'), action = BooleanOptionalAction, default = config.get_bool_value('target_tracker', 'partial_face_mode', 'True'))
+	job_store.register_step_keys([ 'target_track', 'target_track_max_lost_frames', 'target_track_smoothing', 'target_track_iou_threshold', 'target_track_embedding_threshold', 'target_track_motion_weight', 'target_track_identity_weight', 'target_track_debug', 'adaptive_mask', 'adaptive_mask_feather', 'temporal_mask', 'partial_face_mode' ])
 	return program
 
 
@@ -309,7 +328,7 @@ def create_step_index_program() -> ArgumentParser:
 
 
 def collect_step_program() -> ArgumentParser:
-	return ArgumentParser(parents = [ create_face_detector_program(), create_face_landmarker_program(), create_face_selector_program(), create_face_tracker_program(), create_face_masker_program(), create_voice_extractor_program(), create_frame_extraction_program(), create_frame_distribution_program(), create_output_creation_program(), create_workflow_program(), create_processors_program() ], add_help = False)
+	return ArgumentParser(parents = [ create_face_detector_program(), create_face_landmarker_program(), create_face_selector_program(), create_face_tracker_program(), create_target_tracker_program(), create_face_masker_program(), create_voice_extractor_program(), create_frame_extraction_program(), create_frame_distribution_program(), create_output_creation_program(), create_workflow_program(), create_processors_program() ], add_help = False)
 
 
 def collect_job_program() -> ArgumentParser:

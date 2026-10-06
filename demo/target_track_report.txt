@@ -1,0 +1,24 @@
+Target tracking demo - target-240p.mp4
+render edilmiş kadr: 270
+
+KÖHNƏ seçici (hər kadr yenidən seçir):
+  hədəf tapılmayan kadrlar: 34 -> [88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201]
+Aşağıdakı kadrlarda swap tətbiq oluna bilmir, ona görə orijinal üz qalır.
+
+YENİ davamlı izləyici:
+  status bölgüsü: {'tracked': 244, 'predicted': 23, 'lost': 3}
+  lost olan kadrlar: [197, 198, 199]
+
+Süni deteksiya boşluqları (üz müvəqqəti örtülüb) - max_lost_frames = 15:
+  boşluq 88..99 (12 kadr):
+    KÖHNƏ seçici hədəfi tapdı: 0/12 (qalan kadrlarda swap yoxdur, orijinal üz qalır)
+    YENİ izləyici kilidi saxladı: 12/12
+  boşluq 180..201 (22 kadr):
+    KÖHNƏ seçici hədəfi tapdı: 0/22 (qalan kadrlarda swap yoxdur, orijinal üz qalır)
+    YENİ izləyici kilidi saxladı: 19/22
+
+QEYD: KÖHNƏ seçici yalnız pəncərənin orta kadrına baxır
+(get_static_faces([ get_middle(target_vision_frames) ])),
+ona görə üz görünməyəndə hədəfi tamamilə itirir.
+YENİ izləyici əvvəlki müşahidələrdən proqnoz verib kilidi saxlayır,
+yalnız 15 kadrdan çox itkidən sonra hədəfi buraxır.

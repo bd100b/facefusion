@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="az">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FaceFusion — davamlı hədəf izləyici demo</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0e1013; color: #e8eaed; font: 15px/1.55 -apple-system, Segoe UI, Roboto, sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: #9aa0a6; margin: 0 0 24px; }
+  video { width: 100%; border-radius: 12px; background: #000; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 22px 0; }
+  .card { background: #171a1f; border: 1px solid #23272e; border-radius: 12px; padding: 14px 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; letter-spacing: .04em; text-transform: uppercase; }
+  .old h2 { color: #ff6b6b; } .new h2 { color: #6ee787; }
+  ul { margin: 6px 0 0; padding-left: 18px; }
+  li { margin: 3px 0; }
+  pre { background: #171a1f; border: 1px solid #23272e; border-radius: 12px; padding: 16px; overflow-x: auto; font-size: 13px; }
+  code { background: #1c2027; padding: 1px 5px; border-radius: 5px; font-size: 13px; }
+  .note { border-left: 3px solid #f0b429; background: #1d1a12; padding: 12px 14px; border-radius: 8px; color: #f6e3b4; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Davamlı hədəf izləyici — real video nəticəsi</h1>
+  <p class="sub">FaceFusion 3.9 · real detektor + landmarker + recognizer · 270 kadr · 25 fps</p>
+
+  <video controls autoplay loop muted playsinline src="target_track_demo.mp4"></video>
+
+  <div class="grid">
+    <div class="card old">
+      <h2>Sol panel — KÖHNƏ</h2>
+      <p>Hədəf hər kadrda sıfırdan seçilir:
+      <code>get_static_faces([get_middle(target_vision_frames)])</code></p>
+      <ul>
+        <li>Yalnız pəncərənin orta kadrına baxır</li>
+        <li>Üz görünməyəndə hədəf tamamilə itir</li>
+        <li>Swap tətbiq olunmur → orijinal üz qayıdır</li>
+        <li>34 kadrda hədəf itirildi</li>
+      </ul>
+    </div>
+    <div class="card new">
+      <h2>Sağ panel — YENİ</h2>
+      <p>Davamlı hədəf izləyici: <code>target_tracker.select_target_face()</code></p>
+      <ul>
+        <li>Kimliyə bağlı kilid (target_path açarı ilə)</li>
+        <li>tracked / reacquiring / predicted / lost vəziyyətləri</li>
+        <li>Çoxyönlü embedding yaddaşı ilə yenidən tanıma</li>
+        <li>Kilidi saxladı: 12/12 və 19/22 kadr</li>
+        <li>Yalnız 15 kadrdan çox itkidən sonra buraxır</li>
+      </ul>
+    </div>
+  </div>
+
+  <p>Aşağıdaki lent hər kadrın vəziyyətini göstərir:
+  <span style="color:#5ade5a">yaşıl = hədəf kilidli</span>,
+  <span style="color:#f0aa28">narıncı = predicted</span>,
+  <span style="color:#f04646">qırmızı = itirildi</span>.
+  Ağ şaquli xətlər süni deteksiya boşluqlarını (üz müvəqqəti örtülüb) işarələyir.</p>
+
+  <h2 style="font-size:16px;margin-top:28px">Tam hesabat</h2>
+  <pre id="report">yüklənir…</pre>
+
+  <div class="note">
+    <strong>Qeyd:</strong> bu maşında <code>inswapper_128_fp16</code> modeli (~1.6 GB) yaddaşa sığmır,
+    ona görə swap pikselləri render olunmayıb. Demo izləyicinin nəzarət etdiyi iki şeyi göstərir:
+    hansı üzün hədəf seçildiyi və adaptiv maskanın hansı sahəni əhatə etdiyi.
+    Real swap sizin GPU-lu mühitinizdə dəyişməz swapper ilə işləyir.
+  </div>
+</div>
+<script>
+  fetch('target_track_report.txt').then(r => r.text()).then(t => { document.getElementById('report').textContent = t; });
+</script>
+</body>
+</html>

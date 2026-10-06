@@ -2,7 +2,7 @@ from typing import List
 
 import numpy
 
-from facefusion import logger, process_manager, state_manager, translator
+from facefusion import logger, process_manager, state_manager, target_tracker, translator
 from facefusion.audio import create_empty_audio_frame, get_audio_frame, get_voice_frame
 from facefusion.common_helper import get_first
 from facefusion.filesystem import filter_audio_paths
@@ -81,6 +81,7 @@ def process_temp_frame(target_vision_frames : List[VisionFrame], temp_vision_fra
 	source_audio_frame = conditional_get_source_audio_frame(frame_number)
 	source_voice_frame = conditional_get_source_voice_frame(frame_number)
 	temp_vision_mask = extract_vision_mask(temp_vision_frame)
+	target_tracker.set_current_frame_number(frame_number)
 
 	for processor_module in get_processors_modules(state_manager.get_item('processors')):
 		temp_vision_frame, temp_vision_mask = processor_module.process_frame(
